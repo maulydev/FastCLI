@@ -2,6 +2,7 @@ import click
 import os
 from pathlib import Path
 import subprocess
+import sys
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 
@@ -64,8 +65,59 @@ def startapp(name):
     """Create a new FastAPI app."""
     click.echo(f"📦 Creating app: {name}")
     app_path = Path(name)
-    for filename in ["__init__.py", "models.py", "views.py", "serializers.py", "urls.py"]:
+    for filename in ["__init__.py", "models.py", "views.py", "services.py", "schemas.py", "urls.py"]:
         content = render_template(f"app/{filename}.tpl")
         create_file(app_path / filename, content)
 
     click.secho("✅ App created!", fg="green")
+
+
+
+@main.command()
+@click.option("--host", default="127.0.0.1", show_default=True, help="Host to run the server on.")
+@click.option("--port", default=8000, show_default=True, help="Port to run the server on.")
+@click.option("--reload/--no-reload", default=True, help="Enable automatic reload on code changes.")
+def run(host, port, reload):
+    """Run the FastAPI development server."""
+    click.secho(f"\n🚀 Starting server at http://{host}:{port}/docs\n", fg="cyan", bold=True)
+    
+    # Determine entrypoint module: manage.py or project folder
+    entry_script = Path("manage.py")
+    if entry_script.exists():
+        cmd = [sys.executable, "manage.py", "runserver", host, str(port)]
+    else:
+        # attempt to infer project_name from a directory containing settings.py
+        proj_dirs = [p for p in Path(".").iterdir() if p.is_dir() and (p/"settings.py").exists()]
+        if proj_dirs:
+            module = proj_dirs[0].name + ".urls:app"
+        else:
+            module = "main:app"
+        cmd = ["uvicorn", module, "--host", host, "--port", str(port)]
+        if reload:
+            cmd.append("--reload")
+    
+    try:
+        subprocess.run(cmd, check=True)
+    except subprocess.CalledProcessError as e:
+        click.secho(f"❌ Failed to start server: {e}", fg="red", err=True)
+
+@main.command()
+def install():
+    """Install the most common FastAPI dependencies into the current environment."""
+    deps = ["fastapi", "uvicorn", "pydantic", "sqlalchemy"]
+    click.secho("\n📦 Installing dependencies...\n", fg="white", bold=True)
+
+    for pkg in deps:
+        click.secho(f" ➤ Installing {pkg}", fg="blue", nl=False)
+        try:
+            subprocess.run([sys.executable, "-m", "pip", "install", pkg], check=True, stdout=subprocess.DEVNULL)
+            click.secho(" ✓", fg="green")
+        except subprocess.CalledProcessError:
+            click.secho(" ✗", fg="red")
+    
+    click.secho(" ➤ Freezing requirements...", fg="blue")
+    
+    with open("requirements.txt", "w") as f:
+        subprocess.run([sys.executable, "-m", "pip", "freeze"], stdout=f, check=True)
+    
+    click.secho("\n✅ All done! Start your server with: fast runserver\n", fg="green", bold=True)
